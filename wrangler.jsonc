@@ -1,0 +1,12 @@
+{
+  "name": "korsbjerggardening",
+  "main": "worker/cloudflare.js",
+  "compatibility_date": "2026-11-06",
+  "workers_dev": true,
+  "build": {
+    "command": "node scripts/build-custom.mjs"
+  },
+  "vars": {
+    "PORTAL_ORIGIN": "https://antons-korsbjerg-gardening.peaknet.chatgpt.site"
+  }
+}

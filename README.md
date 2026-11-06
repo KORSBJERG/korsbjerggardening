@@ -84,3 +84,21 @@ Det aktive Sites-projekt er `appgprj_6aee27fe0c788191b135ed3a37de3aae`. Build-ou
 GitHub-repositoryet er en kopi af kildekoden. Et push til GitHub udgiver ikke automatisk en ny Sites-version. Der er ikke opsat en løbende GitHub-til-Sites-deploymentintegration.
 
 Billeder og stemningsvideo hentes fra firmaets eksisterende Wix-materiale. Logoet er inkluderet i `worker/assets/`. `pdf-lib` er inkluderet under sin medfølgende MIT-licens.
+
+## Cloudflare Workers Builds fra GitHub
+
+Cloudflare har en selvstændig konfiguration i `wrangler.jsonc`. Den vælger Worker-entrypointet eksplicit, så de bevarede framework-filer ikke starter automatisk Next.js/Hydrogen-detektion.
+
+I Cloudflare Workers Builds bruges repository-roden og branchen `main`. Deploy-kommandoen kan være `npx wrangler deploy`; Wrangler kører selv `node scripts/build-custom.mjs` fra konfigurationens `build.command`. Der er derfor ikke krav om en særskilt build-kommando i dashboardet. Worker-navnet i Cloudflare skal matche `korsbjerggardening` i konfigurationen; hvis din eksisterende Worker har et andet navn, tilpasses `name` til det navn.
+
+Den selvstændige Cloudflare-udgivelse viser den offentlige hjemmeside og dens landingssider. `/app` og `/kontor` sender besøgende videre til den eksisterende beskyttede Sites-app via `PORTAL_ORIGIN`. Appens API-routes eksponeres ikke af den offentlige Worker. Dermed bruges det eksisterende login og datalager, og der skal ikke oprettes en tom erstatningsdatabase i den nye Worker.
+
+`worker/index.js` er fortsat entrypointet i Sites-buildet. `worker/cloudflare.js` er entrypointet til selvstændig Cloudflare-hosting. De to udgivelser deler hjemmesidens kildekode, men har hver sin deployment.
+
+Valider Cloudflare-pakken uden at udgive:
+
+```sh
+npx wrangler@4.158.0 deploy --dry-run --outdir work/wrangler-dry-run
+```
+
+Cloudflare-konto, API-token og egne domæner konfigureres i Cloudflare og indgår ikke i repositoryet.
