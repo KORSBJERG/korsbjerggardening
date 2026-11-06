@@ -40,6 +40,7 @@ Kontrollerne bygger først Worker-filen og tester derefter routes, datalagring o
 - `worker/seo.css` - landingssider samt mobil- og tabletjusteringer til hjemmesiden.
 - `worker/ui.html` - havekontor og kundevisning.
 - `worker/app-responsive.css` - mobil- og tabletvisning i appen.
+- `worker/maps.js` og `worker/maps.css` - adressebaserede kort, luftfoto, placering og ruter.
 - `worker/attendance.js` - ind-/udtjekning og tidsregistrering.
 - `worker/commerce.js` - værktøjer, priser, tilbud og opgavepriser.
 - `worker/quote-pdf.js` - PDF-layout med logo, tilbudslinjer og prisoversigt.
@@ -55,6 +56,12 @@ Mappen `app/`, komponentbiblioteket og de øvrige framework-filer er bevaret fra
 Den hostede løsning bruger Sites-login og R2-bindingen `BUCKET`. Appdata gemmes pr. autentificeret Site-bruger. Produktionens data, kundernes oplysninger og mailhistorik ligger i det hostede datalager og er ikke med i GitHub-repositoryet.
 
 Sitet er aktuelt privat. Kundevisningen er en demonstration; selvstændig kundeadgang og tildeling af administrator-/kunderoller er endnu ikke implementeret. Et skift til offentlig adgang kræver særskilt afklaring af portalens adgangsmodel. `noindex` og robots-regler er SEO-indstillinger, ikke adgangskontrol.
+
+## Havekort
+
+Kort i havekontoret og kundevisningen er interaktive Google Maps-visninger baseret på den valgte haves adresse. Der kan skiftes mellem vejkort og luftfoto, åbnes rutevejledning og gemmes en præcis kortnål som breddegrad/længdegrad. Anton kan rette adressen eller indsætte koordinater kopieret fra Google Maps. Koordinater knyttes til den aktuelle adresse; ændres adressen andetsteds, bruges den nye adresse frem for en forældet kortnål. Placeringer gemmes i den eksisterende R2-state. Havearealer er registrerede oplysninger, ikke opmåling fra luftfoto.
+
+Google Maps modtager adressen eller koordinaterne, når kortet indlæses. Visningerne kræver internet og afhænger af Googles kortdækning. Ingen API-nøgle eller betalt geokodningstjeneste er tilføjet. Hjemmesidens områdekort viser den offentlige firmaadresse ved Knebel.
 
 ## Tilbud og mail
 

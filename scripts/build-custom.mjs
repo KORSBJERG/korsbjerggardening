@@ -5,6 +5,8 @@ let server=await readFile('worker/index.js','utf8');let ui=await readFile('worke
 ui=ui.replace('/* ATTENDANCE_HELPERS */',await readFile('worker/attendance.js','utf8'));
 ui=ui.replace('/* COMMERCE_HELPERS */',await readFile('worker/commerce.js','utf8'));
 ui=ui.replace('/* PDF_MAIL_HELPERS */',await readFile('worker/pdf-mail-ui.js','utf8'));
+ui=ui.replace('/* MAP_HELPERS */',await readFile('worker/maps.js','utf8'));
+ui=ui.replace('</style>',await readFile('worker/maps.css','utf8')+'</style>');
 ui=ui.replace('</style>',await readFile('worker/app-responsive.css','utf8')+'</style>');
 server=server.replace("import { html } from './ui.js';",'const html = '+JSON.stringify(ui)+';');
 let frontTemplate=await readFile('worker/front.html','utf8');
