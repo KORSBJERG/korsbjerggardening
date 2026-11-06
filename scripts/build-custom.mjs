@@ -1,0 +1,25 @@
+import {readFile,writeFile,mkdir,copyFile} from 'node:fs/promises';
+import {buildSeoPages,optimizeHome} from './seo-pages.mjs';
+await mkdir('dist/server',{recursive:true});await mkdir('dist/.openai',{recursive:true});
+let server=await readFile('worker/index.js','utf8');let ui=await readFile('worker/ui.html','utf8');
+ui=ui.replace('/* ATTENDANCE_HELPERS */',await readFile('worker/attendance.js','utf8'));
+ui=ui.replace('/* COMMERCE_HELPERS */',await readFile('worker/commerce.js','utf8'));
+ui=ui.replace('/* PDF_MAIL_HELPERS */',await readFile('worker/pdf-mail-ui.js','utf8'));
+ui=ui.replace('</style>',await readFile('worker/app-responsive.css','utf8')+'</style>');
+server=server.replace("import { html } from './ui.js';",'const html = '+JSON.stringify(ui)+';');
+let frontTemplate=await readFile('worker/front.html','utf8');
+frontTemplate=frontTemplate.replace('</style>',await readFile('worker/seo.css','utf8')+'</style>');
+const heroPoster=frontTemplate.match(/id="heroVideo"[^>]*poster="([^"]+)"/)?.[1];
+if(heroPoster)frontTemplate=frontTemplate.replace('</head>','<link rel="preload" as="image" fetchpriority="high" href="'+heroPoster+'"></head>');
+function responsiveImages(document){return document.replace(/<img\b[^>]*>/g,tag=>{if(tag.includes('srcset='))return tag;const src=tag.match(/src="([^"]+)"/)?.[1],dimensions=src?.match(/\/v1\/fill\/w_(\d+),h_(\d+),/);if(!dimensions)return tag;const width=Number(dimensions[1]),height=Number(dimensions[2]);const variants=[360,640,900,width].filter((v,i,a)=>v<=width&&a.indexOf(v)===i).sort((a,b)=>a-b);return tag.replace('>', ' srcset="'+variants.map(w=>src.replace('/w_'+width+',h_'+height+',','/w_'+w+',h_'+Math.round(height*w/width)+',')+' '+w+'w').join(', ')+'" sizes="(max-width:760px) calc(100vw - 40px), (max-width:1024px) 80vw, 45vw" decoding="async">')})}
+const front=responsiveImages(optimizeHome(frontTemplate)),seoDocuments=Object.fromEntries(Object.entries(buildSeoPages(frontTemplate)).map(([path,doc])=>[path,responsiveImages(doc)]));
+server='const seoDocuments = '+JSON.stringify(seoDocuments)+';\nconst frontHtml = '+JSON.stringify(front)+';\n'+server;
+const logo=await readFile('worker/assets/korsbjerg-gardening-logo.png');
+server='const logoBase64 = '+JSON.stringify(logo.toString('base64'))+';\n'+server;
+let library=await readFile('worker/vendor/pdf-lib.esm.min.js','utf8');
+const exports=library.match(/export\{([^}]+)\};/);if(!exports)throw Error('Missing pdf-lib exports');
+const exposed=exports[1].split(',').map(s=>s.trim().split(/\s+as\s+/)).filter(parts=>['PDFDocument','StandardFonts','rgb'].includes(parts.at(-1))).map(parts=>parts.at(-1)+':'+parts[0]).join(',');
+library=library.replace(exports[0],'return {'+exposed+'};').replace(/\/\/# sourceMappingURL=.*$/m,'');
+server='const PDFLib=(()=>{'+library+'})();\n'+await readFile('worker/quote-pdf.js','utf8')+'\n'+await readFile('worker/quote-delivery.js','utf8')+'\n'+server;
+await writeFile('dist/server/index.js',server);await copyFile('.openai/hosting.json','dist/.openai/hosting.json');
+console.log('Built self-contained Gardening Worker');

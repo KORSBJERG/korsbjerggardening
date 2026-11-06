@@ -1,0 +1,12 @@
+{
+  "name": "antons-gardening",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-custom.mjs",
+    "test": "node scripts/test-all.mjs",
+    "dev": "node scripts/preview-custom.mjs"
+  },
+  "description": "Korsbjerg Gardening: hjemmeside, SEO-landingssider, kundeportal og havekontor"
+}

@@ -1,0 +1,21 @@
+import {readFile} from 'node:fs/promises';import vm from 'node:vm';import assert from 'node:assert/strict';import {randomUUID} from 'node:crypto';
+const source=await readFile('worker/attendance.js','utf8');
+const task={id:'t1',garden:'g1',title:'Hækklipning',status:'Planlagt'};
+const state={tasks:[task],logs:[],timer:null,prefs:{report:true}};
+let succeeds=true,saves=0;
+class FormDataStub{constructor(form){this.data=form.values}get(k){return this.data[k]}has(k){return k in this.data}}
+const ctx=vm.createContext({state,customerMode:false,crypto:{randomUUID},Date,console,FormData:FormDataStub,save:async()=>{saves++;return succeeds},toast:()=>{},render:()=>{},close:()=>{},notify:()=>{},garden:()=>({name:'Testhave'}),esc:String,icon:()=>'',date:String,modal:()=>{}});
+vm.runInContext(source,ctx);
+await vm.runInContext("checkIn('t1')",ctx);assert.equal(task.status,'I gang');assert.equal(ctx.state.timer.taskId,'t1');assert.equal(saves,1);
+const session=ctx.state.timer.sessionId;await vm.runInContext("checkIn('t1')",ctx);assert.equal(saves,1);assert.equal(ctx.state.timer.sessionId,session);
+const makeForm=(values={complete:'on',note:'Hæk klippet og ryddet'})=>({values,dataset:{end:String(ctx.state.timer.start+3661000),session:ctx.state.timer.sessionId},querySelectorAll:()=>[]});
+ctx.form=makeForm();await vm.runInContext('confirmCheckOut(form)',ctx);assert.equal(ctx.state.timer,null);assert.equal(ctx.state.tasks[0].status,'Afsluttet');assert.equal(ctx.state.logs.length,1);assert.equal(ctx.state.logs[0].durationSeconds,3661);assert.equal(ctx.state.logs[0].hours,3661/3600);assert.equal(ctx.state.logs[0].note,'Hæk klippet og ryddet');assert.equal(new Date(ctx.state.logs[0].checkedOutAt)-new Date(ctx.state.logs[0].checkedInAt),3661000);
+await vm.runInContext('confirmCheckOut(form)',ctx);assert.equal(ctx.state.logs.length,1);
+ctx.state.tasks[0].status='Planlagt';succeeds=false;await vm.runInContext("checkIn('t1')",ctx);assert.equal(ctx.state.timer,null);assert.equal(ctx.state.tasks[0].status,'Planlagt');
+succeeds=true;await vm.runInContext("checkIn('t1')",ctx);ctx.form=makeForm({note:'Delvist færdig'});succeeds=false;await vm.runInContext('confirmCheckOut(form)',ctx);assert.ok(ctx.state.timer);assert.equal(ctx.state.logs.length,1);
+succeeds=true;await vm.runInContext('confirmCheckOut(form)',ctx);assert.equal(ctx.state.timer,null);assert.equal(ctx.state.tasks[0].status,'Planlagt');assert.equal(ctx.state.logs.length,2);
+ctx.state.tasks[0].status='Afventer godkendelse';await vm.runInContext("checkIn('t1')",ctx);assert.equal(ctx.state.timer,null);
+ctx.state.tasks[0].status='Planlagt';ctx.customerMode=true;await vm.runInContext("checkIn('t1')",ctx);assert.equal(ctx.state.timer,null);
+assert.equal(vm.runInContext("localDay('2026-11-06T23:30:00Z')",ctx),'2026-11-07');
+const build=await readFile('dist/server/index.js','utf8');const worker=(await import('data:text/javascript;base64,'+Buffer.from(build).toString('base64'))).default;const html=await(await worker.fetch(new Request('https://example.test/kontor'),{})).text();new Function(html.match(/<script>([\s\S]*)<\/script>/)[1]);assert.ok(!html.includes('/* ATTENDANCE_HELPERS */'));
+console.log('PASS: check-in; single active task; exact duration; linked task and timestamps; checkout note; completion or continued work; duplicate prevention; failed-save rollback; customer controls blocked; pending approval blocked; Copenhagen date; compiled UI syntax.');
