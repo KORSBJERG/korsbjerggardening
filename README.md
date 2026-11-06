@@ -14,14 +14,14 @@ Aktuel udgivelse: https://antons-korsbjerg-gardening.peaknet.chatgpt.site/
 
 ## Kør lokalt
 
-Kræver Node.js 22.13 eller nyere. Den aktive Worker-app har ingen npm-afhængigheder; PDF-biblioteket følger med i `worker/vendor/` med licens.
+Kræver Node.js 24 eller nyere til tests og lokal SQLite-preview. Den aktive Worker-app har ingen npm-afhængigheder; PDF-biblioteket følger med i `worker/vendor/` med licens.
 
 ```sh
 node scripts/build-custom.mjs
 node scripts/preview-custom.mjs
 ```
 
-Åbn http://127.0.0.1:3086/. Den lokale preview bruger en simuleret bruger og et midlertidigt datalager i hukommelsen. Lokale ændringer forsvinder, når preview-processen stoppes, og påvirker ikke produktionens data.
+Åbn http://127.0.0.1:3086/. Den lokale preview bruger en simuleret ejeridentitet, midlertidig SQLite og et R2-lager i hukommelsen. Lokale ændringer forsvinder, når preview-processen stoppes, og påvirker ikke produktionens data.
 
 Med en almindelig Node/npm-installation kan du også bruge `npm run build`, `npm run dev` og `npm test`.
 
@@ -46,20 +46,40 @@ Kontrollerne bygger først Worker-filen og tester derefter routes, datalagring o
 - `worker/quote-pdf.js` - PDF-layout med logo, tilbudslinjer og prisoversigt.
 - `worker/quote-delivery.js` - PDF-download, mailkladders vedhæftninger og mailafsendelse.
 - `worker/pdf-mail-ui.js` - dialoger til PDF og mail.
-- `worker/index.js` - Worker-routes og R2-adgang.
+- `worker/index.js` - Worker-routes.
+- `worker/access.js` - serverbaserede roller, sessionskontrol, D1-data og R2-import.
+- `worker/access-ui.js` - login, kundehåndlinger og brugeradministration.
 - `.openai/hosting.json` - eksisterende Sites-identitet og lagringsbinding.
 
 Mappen `app/`, komponentbiblioteket og de øvrige framework-filer er bevaret fra det oprindelige starterprojekt. Det aktive build er `scripts/build-custom.mjs`; det skriver den selvstændige Worker til `dist/server/index.js`.
 
 ## Data, login og adgang
 
-Den hostede løsning bruger Sites-login og R2-bindingen `BUCKET`. Appdata gemmes pr. autentificeret Site-bruger. Produktionens data, kundernes oplysninger og mailhistorik ligger i det hostede datalager og er ikke med i GitHub-repositoryet.
+Sites håndterer identitet og login. Worker-koden kontrollerer særskilt adgang på serveren ved hvert beskyttet kald. Den separate Cloudflare Worker indeholder fortsat ingen app-/databindinger og viderestiller `/app` og `/kontor` til Sites.
 
-Sitet er aktuelt privat. Kundevisningen er en demonstration; selvstændig kundeadgang og tildeling af administrator-/kunderoller er endnu ikke implementeret. Et skift til offentlig adgang kræver særskilt afklaring af portalens adgangsmodel. `noindex` og robots-regler er SEO-indstillinger, ikke adgangskontrol.
+- Administrator: brugere, roller, invitationer og revisionsoversigt. Adgang til kontorets data kræver desuden `can_operate`.
+- Anton / driftsansvarlig: fælles havekontor, kunder, planlægning, priser, tidsregistrering og tilbud. Kan invitere kunder, men ikke administratorer eller andre driftsansvarlige.
+- Kunde: kun eksplicit tildelte haver. Serveren sender kun kundevendte felter, publicerede tilbud og eksplicit delte tidsregistreringer. Kunden kan sende beskeder/opgaveønsker og besvare egne tilbud/opgaveforslag. Kundens identitet og svardato bestemmes af serveren.
+
+**Før første udgivelse:** Sæt `PORTAL_OWNER_EMAIL` til ejerens verificerede Sites-login-e-mail i runtime-indstillingerne. Det er ikke en offentlig konfigurationsvariabel. Første match bindes atomisk til ejerens stabile Sites-bruger-id. En vilkårlig første besøgende kan aldrig blive administrator. Ejeren starter med administrator- og driftsadgang og kan ikke spærres fra brugeroversigten. Ingen kunde- eller Anton-identitet er gættet eller forudoprettet.
+
+D1-bindingen `DB` indeholder brugere, havemedlemskaber, invitationer, sessioner, rategrænser og revisionshændelser. Forretningsdata ligger i et fælles versionsstyret JSON-snapshot i D1; det bevarer den eksisterende kontorbrugerflade og giver atomiske konflikttjek på kundesvar og kontorændringer. Dette er en bevidst overgangsmodel, ikke fuldt normaliserede tabeller for hver have/opgave. Snapshotgrænsen er 500 KB; større datamængder kræver efterfølgende normalisering/paginering.
+
+`drizzle/0000_portal_access.sql` er den schema-only D1-migration. Det aktive custom build bruger ikke Drizzle ORM ved runtime. Fremtidige schemaændringer skal tilføjes som nye migrationer, og den medfølgende schemaerklæring holdes ajour.
+
+Ved ejerens første indlæsning importeres eksisterende `gardening/<Sites-bruger-id>.json` fra R2 til D1. Originalen ændres ikke. En ekstra skrivebeskyttet-førstegangsbackup gemmes i `gardening-backups/access-v1/`. Data under andre loginidentiteter sammenflettes ikke automatisk. Ingen eksempeldata indsættes, hvis ejerens R2-fil er tom. Eksisterende mailhistorik bliver liggende uændret under sine oprindelige R2-nøgler; nye afsendelser gemmes fælles under `gardening-business/`.
+
+En kunde inviteres fra **Brugere & adgang**: vælg login-e-mail og præcise haver, opret link og send det selv. Linket udløber efter 48 timer og kan kun bruges én gang af den inviterede verificerede e-mail. Kun tokenhashen gemmes. Linket bruger URL-fragment; portalen sender ingen referrer. Invitationslinks udsendes ikke automatisk. Hvis Sites-audiencen fortsat er privat, skal besøgende også være tilladt af Sites; en applikationsinvitation ophæver ikke platformens adgangspolitik.
+
+App-sessioner er bundet til den aktuelle Sites-identitet med Secure/HttpOnly/SameSite-cookies, CSRF-token og streng Origin-kontrol. Medarbejdersessioner har 8 timers maksimum og 30 minutters inaktivitet; kundesessioner har 7 dages maksimum og 24 timers inaktivitet. Sites-login er fortsat den overordnede login-session; en ny app-session for en allerede Sites-indlogget bruger er ikke en garanti for ny MFA. MFA/passkeys skal aktiveres på login-kontoen; denne kode kan ikke konfigurere eller attestere Sites/ChatGPT MFA. Ingen OAuth-provider eller kodebaseret adgangskode er tilføjet.
+
+Spærring og ændrede haver/roller kontrolleres ved næste kald, og eksisterende app-sessioner tilbagekaldes ved adgangsændringer. Kontorets bulk-save kræver driftsadgang og versionskontrol; kunder har kun afgrænsede operationsendpoints. Tilbudssnapshots er låst efter publicering. Nye beskeder, tilbudssvar og ind-/udtjekning stemples på serveren. Historiske og manuelt rettede tidsregistreringer er driftsfunktioner; noter offentliggøres kun efter eksplicit valg.
+
+`noindex` og robots-regler er kun SEO. Hele Sites-udgivelsen må først åbnes efter test af anonym adgang, rollegrænser og platformens identitetsinjektion. Den offentlige Cloudflare-Worker må aldrig skiftes til `worker/index.js`.
 
 ## Havekort
 
-Kort i havekontoret og kundevisningen er interaktive Google Maps-visninger baseret på den valgte haves adresse. Der kan skiftes mellem vejkort og luftfoto, åbnes rutevejledning og gemmes en præcis kortnål som breddegrad/længdegrad. Anton kan rette adressen eller indsætte koordinater kopieret fra Google Maps. Koordinater knyttes til den aktuelle adresse; ændres adressen andetsteds, bruges den nye adresse frem for en forældet kortnål. Placeringer gemmes i den eksisterende R2-state. Havearealer er registrerede oplysninger, ikke opmåling fra luftfoto.
+Kort i havekontoret og kundevisningen er interaktive Google Maps-visninger baseret på den valgte haves adresse. Der kan skiftes mellem vejkort og luftfoto, åbnes rutevejledning og gemmes en præcis kortnål som breddegrad/længdegrad. Anton kan rette adressen eller indsætte koordinater kopieret fra Google Maps. Koordinater knyttes til den aktuelle adresse; ændres adressen andetsteds, bruges den nye adresse frem for en forældet kortnål. Placeringer gemmes i kontorets fælles D1-snapshot. Havearealer er registrerede oplysninger, ikke opmåling fra luftfoto.
 
 Google Maps modtager adressen eller koordinaterne, når kortet indlæses. Visningerne kræver internet og afhænger af Googles kortdækning. Ingen API-nøgle eller betalt geokodningstjeneste er tilføjet. Hjemmesidens områdekort viser den offentlige firmaadresse ved Knebel.
 

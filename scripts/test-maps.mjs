@@ -19,7 +19,7 @@ assert.match(run('mapLinks(state.gardens[0]).route'),/destination=56.2%2C10.4/);
 run('state.gardens[0].address="Changed address"');assert.equal(run('mapQuery(state.gardens[0])'),'Changed address');
 assert.match(run('gardenMap({name:"No address"})'),/Tilføj havens fulde adresse/);
 run('selectedGarden="g2"');assert.match(run('mapSvg()'),/Anden%20vej/);
-run('customerMode=true');const customer=run('mapPage()');assert(!customer.includes('data-map-edit'));assert(!customer.includes('Have A'));
+run('customerMode=true;state.gardens=state.gardens.filter(g=>g.id===selectedGarden)');const customer=run('mapPage()');assert(!customer.includes('data-map-edit'));assert(!customer.includes('Have A'));
 run('state.gardens=[]');assert.match(run('mapPage()'),/Opret en have/);
 const ui=await readFile('worker/ui.html','utf8'),front=await readFile('worker/front.html','utf8');
 assert(!ui.includes('20764'));assert(!ui.includes('540 m²'));assert(!ui.includes('Illustrativt oversigtskort'));

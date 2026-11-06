@@ -1,12 +1,14 @@
-import {readFile} from 'node:fs/promises';import assert from 'node:assert/strict';
-const source=await readFile('dist/server/index.js','utf8');const worker=(await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'))).default;
-const ui=await readFile('worker/ui.html','utf8');new Function(ui.match(/<script>([\s\S]*)<\/script>/)[1]);
-const records=new Map();const bucket={async get(k){const x=records.get(k);return x?{etag:x.etag,json:async()=>JSON.parse(x.raw)}:null},async put(k,raw,opts){const old=records.get(k);if(opts.onlyIf.etagMatches&&old?.etag!==opts.onlyIf.etagMatches)return null;if(opts.onlyIf.etagDoesNotMatch==='*'&&old)return null;const etag=crypto.randomUUID();records.set(k,{raw,etag});return {etag}}};
-const call=(method,user='owner',body=null,origin='https://test.example')=>worker.fetch(new Request('https://test.example/api/state',{method,headers:{...(user?{'oai-authenticated-user-id':user}:{}),origin,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})}),{BUCKET:bucket});
-assert.equal((await call('GET',null)).status,401);assert.equal((await call('PUT','owner',{state:{}},'https://evil.example')).status,403);
-assert.deepEqual(await (await call('GET')).json(),{state:null,etag:null});
-const state={tasks:[],gardens:[],logs:[],messages:[]};let res=await call('PUT','owner',{state,etag:null});assert.equal(res.status,200);const {etag}=await res.json();
-assert.deepEqual((await (await call('GET')).json()).state,state);assert.equal((await call('PUT','owner',{state,etag:null})).status,409);assert.equal((await call('PUT','owner',{state,etag:'stale'})).status,409);assert.equal((await call('PUT','owner',{state,etag})).status,200);
-assert.equal((await (await call('GET','other-user')).json()).state,null);assert.equal((await call('PUT','owner',{state:{}})).status,400);
-for(const path of ['/kontor','/app']){const r=await worker.fetch(new Request('https://test.example'+path),{});assert.equal(r.status,200);assert.match(await r.text(),/Antons Korsbjerg/)}
-console.log('PASS: UI syntax; admin and portal routes; identity required; origin protection; persistent round-trip; conflict detection; per-user isolation; malformed data rejected.');
+import assert from 'node:assert/strict';import {readFile} from 'node:fs/promises';import {fixture,fixtureState} from './portal-test-support.mjs';
+const f=await fixture();const anon=f.client(null);assert.equal((await anon.call('/api/state')).status,401);
+const r=await f.owner.call('/api/state');const first=await r.json();assert.equal(r.status,200);assert.deepEqual(first.state.gardens,[]);
+const state={...fixtureState(),gardens:[{id:'g1',name:'Have',customer:'Kunde',address:'Vej 1',area:100,budget:4}]};
+assert.equal((await f.owner.call('/api/state','PUT',{state,etag:first.etag},{origin:'https://evil.test'})).status,403);
+assert.equal((await f.owner.call('/api/state','PUT',{state,etag:first.etag},{'x-csrf-token':'wrong'})).status,403);
+const saved=await f.owner.call('/api/state','PUT',{state,etag:first.etag});assert.equal(saved.status,200);const {etag}=await saved.json();assert.equal((await f.owner.call('/api/state','PUT',{state,etag:first.etag})).status,409);
+assert.equal((await f.owner.call('/api/state','PUT',{state:{},etag})).status,400);
+const unknown=f.client('unknown');assert.equal((await unknown.call('/api/state')).status,403);
+const customer=f.addUser('customer','customer',['g1']);await customer.login();assert.equal((await customer.call('/api/state')).status,200);assert.equal((await customer.call('/api/state','PUT',{state,etag})).status,403);
+assert.equal((await anon.call('/kontor')).status,302);assert.equal((await customer.call('/kontor')).status,302);
+for(const path of ['/kontor','/app']){const page=await f.owner.call(path);assert.equal(page.status,200);new Function((await page.text()).match(/<script>([\s\S]*)<\/script>/)[1])}
+const ui=await readFile('worker/ui.html','utf8');assert(!ui.includes('const initial=()=>({gardens:[{'));assert(!ui.includes('DEMODATA'));
+console.log('PASS: protected routes; owner pin; no demonstration state; staff CAS; strict origin and CSRF; deny unknown users; customer bulk write denied; compiled UI syntax.');

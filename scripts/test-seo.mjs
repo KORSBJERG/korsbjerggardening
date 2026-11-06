@@ -1,3 +1,4 @@
+import {fixture} from './portal-test-support.mjs';
 import {readFile} from 'node:fs/promises';import assert from 'node:assert/strict';import {seoPages} from './seo-pages.mjs';
 const code=await readFile('dist/server/index.js','utf8');const worker=(await import('data:text/javascript;base64,'+Buffer.from(code).toString('base64'))).default;
 const origin='https://example.test',titles=new Set(),descriptions=new Set();
@@ -5,6 +6,6 @@ for(const path of ['/',...seoPages.map(p=>p.path)]){const res=await worker.fetch
 const sitemap=await(await worker.fetch(new Request(origin+'/sitemap.xml'),{})).text();assert.equal((sitemap.match(/<loc>/g)||[]).length,7);assert.ok(!sitemap.includes('/kontor'));assert.ok(!sitemap.includes('/app'));
 const robots=await(await worker.fetch(new Request(origin+'/robots.txt'),{})).text();assert.ok(robots.includes('Sitemap: '+origin+'/sitemap.xml'));assert.ok(robots.includes('Disallow: /api/'));
 const trailing=await worker.fetch(new Request(origin+'/graesslaaning/?source=test'),{});assert.equal(trailing.status,308);assert.equal(trailing.headers.get('location'),origin+'/graesslaaning?source=test');
-for(const path of ['/kontor','/app']){const res=await worker.fetch(new Request(origin+path),{});assert.equal(res.headers.get('x-robots-tag'),'noindex, nofollow');const html=await res.text();assert.match(html,/content="noindex,nofollow"/);assert.match(html,/enhanceResponsiveTables/)}
+const appFixture=await fixture();for(const path of ['/kontor','/app']){const res=await appFixture.owner.call(path);assert.equal(res.headers.get('x-robots-tag'),'noindex, nofollow');const html=await res.text();assert.match(html,/content="noindex,nofollow"/);assert.match(html,/enhanceResponsiveTables/)}
 const custom=await(await worker.fetch(new Request(origin+'/haekklipning'),{PUBLIC_SITE_URL:'https://gardening.example'})).text();assert.ok(custom.includes('href="https://gardening.example/haekklipning"'));
 console.log('PASS: 7 server-rendered SEO pages; unique titles/descriptions; one H1; canonical and share URLs; valid LocalBusiness/Service/Breadcrumb JSON-LD; original articles and FAQ; crawlable links; responsive image sources; clean sitemap; private app noindex; slash redirects; future canonical domain configuration.');
