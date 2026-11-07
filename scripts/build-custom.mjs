@@ -25,5 +25,6 @@ const exposed=exports[1].split(',').map(s=>s.trim().split(/\s+as\s+/)).filter(pa
 library=library.replace(exports[0],'return {'+exposed+'};').replace(/\/\/# sourceMappingURL=.*$/m,'');
 server='const loginHtml = '+JSON.stringify(await readFile('worker/login.html','utf8'))+';\n'+await readFile('worker/vendor/jose.min.js','utf8')+'\n'+await readFile('worker/microsoft-auth.js','utf8')+'\n'+server;
 server='const PDFLib=(()=>{'+library+'})();\n'+await readFile('worker/quote-pdf.js','utf8')+'\n'+await readFile('worker/quote-delivery.js','utf8')+'\n'+await readFile('worker/access.js','utf8')+'\n'+server;
+server=await readFile('worker/mail-transport.js','utf8')+'\n'+server;
 await writeFile('dist/server/index.js',server);await copyFile('.openai/hosting.json','dist/.openai/hosting.json');
 console.log('Built self-contained Gardening Worker');

@@ -201,7 +201,7 @@ async function handlePortalRoutes(request,env){
   obj.status=action==='accept'?(kind==='quotes'?'Godkendt':'Planlagt'):'Afvist';obj.respondedAt=new Date().toISOString();obj.respondedBy=u.id;
   await persistState(env,u,state,version,kind+'.'+action,id);return json({ok:true});
  }
- if(path.startsWith('/api/quotes/')||path==='/api/mail/status')return handleQuoteRoutes(request,env,u);
+ if(path.startsWith('/api/quotes/')||['/api/mail/status','/api/mail/test'].includes(path))return handleQuoteRoutes(request,env,u);
  return json({error:'Siden blev ikke fundet.'},404);
 }
 function requireGarden(state,u,id){if(!state.gardens.some(g=>g.id===id)||!operates(u)&&!(u.role==='customer'&&JSON.parse(u.gardens).includes(id)))fail('Posten blev ikke fundet.',404)}
@@ -213,12 +213,12 @@ async function accessRoutes(request,env,u){
   const users=(await query(env,'SELECT * FROM portal_users ORDER BY created_at').all()).results;
   const invites=(await query(env,'SELECT id,email,name,role,gardens,expires_at,consumed_by,revoked FROM portal_invitations ORDER BY created_at DESC LIMIT 100').all()).results;
   const events=isAdmin?(await query(env,'SELECT user_id,action,target,created_at FROM portal_audit ORDER BY created_at DESC LIMIT 100').all()).results:[];
-  return json({authMode:externalLogin(env)?'microsoft':'sites',mailConfigured:!!(env.RESEND_API_KEY&&env.MAIL_FROM),users:users.filter(x=>isAdmin||x.role==='customer').map(userView),invitations:invites.filter(x=>isAdmin||x.role==='customer').map(x=>({...x,gardens:JSON.parse(x.gardens)})),events});
+  return json({authMode:externalLogin(env)?'microsoft':'sites',mailConfigured:mailConfigured(env),users:users.filter(x=>isAdmin||x.role==='customer').map(userView),invitations:invites.filter(x=>isAdmin||x.role==='customer').map(x=>({...x,gardens:JSON.parse(x.gardens)})),events});
  }
  if(path==='/api/access/invitations'&&request.method==='POST'){
   await limit(env,u,'invite',10);const body=await readBody(request,6000),role=body.role||'customer';
   if(externalLogin(env)&&role!=='customer')fail('Medarbejderadgang styres med Microsoft 365.',403);
-  if(body.delivery==='email'&&(!env.RESEND_API_KEY||!env.MAIL_FROM))fail('Mailafsendelse er ikke tilsluttet. Vælg mailkladde.',503);
+  if(body.delivery==='email'&&!mailConfigured(env))fail('Mailafsendelse er ikke tilsluttet. Vælg mailkladde.',503);
   if(!['administrator','anton','customer'].includes(role)||!isAdmin&&role!=='customer')fail('Du kan kun invitere kunder.',403);
   if(typeof body.email!=='string'||!emailPattern.test(body.email)||body.email.length>254||typeof body.name!=='string'||!body.name.trim()||body.name.length>100)fail('Kontroller navn og e-mail.');
   const {state}=await sharedState(env,u),gardens=body.gardens;

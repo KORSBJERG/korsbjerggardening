@@ -92,7 +92,7 @@ Google Maps modtager adressen eller koordinaterne, når kortet indlæses. Visnin
 - Tilbud gemmer deres egne priser. En ændret standardtimepris ændrer ikke tidligere tilbud.
 - PDF'er kan hentes direkte fra gemte tilbud.
 - En `.eml`-mailkladde kan hentes med PDF'en vedhæftet og sendes fra et kompatibelt mailprogram.
-- Direkte mailafsendelse kræver `RESEND_API_KEY` og en verificeret `MAIL_FROM` i produktionens runtime-indstillinger. Disse er ikke tilsluttet i den nuværende udgivelse.
+- Direkte mailafsendelse understøtter SMTP2GO via `MAIL_PROVIDER=smtp2go`, `SMTP2GO_API_KEY` og en verificeret `MAIL_FROM` i runtime-indstillingerne. Invitationer, loginlinks og PDF-tilbud bruger samme afsender. Opsætningen skal færdiggøres i SMTP2GO/Cloudflare, før kundelogin åbnes. Resend er bevaret som valgfri ældre provider.
 - Kontaktformularen på hjemmesiden åbner en mail i den besøgendes mailprogram; den indsender ikke en henvendelse til et CRM.
 
 Se `.env.example` for variabelnavne. Filen indeholder ingen nøgler og indlæses ikke automatisk af den lokale preview.

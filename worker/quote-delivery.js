@@ -4,10 +4,18 @@ const encodeUtf8=s=>encodeBytes(new TextEncoder().encode(s));
 function mimeSubject(s){const parts=[];let chunk='';for(const c of s){if(new TextEncoder().encode(chunk+c).length>42){parts.push(chunk);chunk=c}else chunk+=c}if(chunk)parts.push(chunk);return parts.map(p=>'=?UTF-8?B?'+encodeUtf8(p)+'?=').join('\r\n ')}
 function mimeDraft(q,company,body,pdf){const boundary='korsbjerg_'+crypto.randomUUID().replaceAll('-',''),lines=s=>s.match(/.{1,76}/g)?.join('\r\n')||'';return ['X-Unsent: 1','MIME-Version: 1.0','To: '+body.to,'From: '+(emailPattern.test(company.email)?company.email:'Gardening@Korsbjerg.dk'),'Subject: '+mimeSubject(body.subject),'Content-Type: multipart/mixed; boundary="'+boundary+'"','','--'+boundary,'Content-Type: text/plain; charset=UTF-8','Content-Transfer-Encoding: base64','',lines(encodeUtf8(body.message)),'--'+boundary,'Content-Type: application/pdf; name="'+quoteFileName(q)+'"','Content-Disposition: attachment; filename="'+quoteFileName(q)+'"','Content-Transfer-Encoding: base64','',lines(encodeBytes(pdf)),'--'+boundary+'--',''].join('\r\n')}
 async function handleQuoteRoutes(request,env,u){
- const url=new URL(request.url);if(!url.pathname.startsWith('/api/quotes/')&&url.pathname!=='/api/mail/status')return null;
+ const url=new URL(request.url);if(!url.pathname.startsWith('/api/quotes/')&&!['/api/mail/status','/api/mail/test'].includes(url.pathname))return null;
  if(!u)fail('Log ind for at hente eller sende tilbud.',401);
- if(!operates(u)&&url.pathname==='/api/mail/status')fail('Kun havekontoret har adgang til mailopsætning.',403);
- if(url.pathname==='/api/mail/status'&&request.method==='GET')return json({configured:!!(env.RESEND_API_KEY&&env.MAIL_FROM),from:env.MAIL_FROM||'Gardening@Korsbjerg.dk'});
+ if(!operates(u)&&url.pathname.startsWith('/api/mail/'))fail('Kun havekontoret har adgang til mailopsætning.',403);
+ if(url.pathname==='/api/mail/test'){
+  if(request.method!=='POST')return json({error:'Brug testknappen i havekontoret.'},405);
+  const body=await readBody(request,1000);if(!/^[0-9a-f-]{36}$/.test(body.requestId||''))fail('Afsendelses-id mangler.');
+  await limit(env,u,'test-mail',5);
+  const to=env.MS_ADMIN_EMAIL||'anton@korsbjerg.dk';if(!emailPattern.test(to))fail('Kontroller administratorens mailadresse.',503);
+  const providerId=await transactionalMail(env,{to,subject:'Test af Korsbjerg Haveportal',text:'Dette er en test af mailforbindelsen til Korsbjerg Haveportal.\n\nPortalen: '+url.origin+'/app\n\nIngen kundeoplysninger er med i denne mail.\n\nKorsbjerg Gardening',idempotencyKey:'test/'+body.requestId});
+  await audit(env,u,'mail.test',to);return json({accepted:true,to,providerId});
+ }
+ if(url.pathname==='/api/mail/status'&&request.method==='GET')return json({configured:mailConfigured(env),provider:mailProvider(env),from:env.MAIL_FROM||'Gardening@Korsbjerg.dk'});
  const match=url.pathname.match(/^\/api\/quotes\/([A-Za-z0-9_-]{1,120})\/(pdf|email|mail-draft|mail-status)$/);if(!match)return json({error:'Siden blev ikke fundet.'},404);
  if(!env.BUCKET)return json({error:'Datalageret er ikke tilgængeligt.'},503);
  const [,id,action]=match;const {state}=await sharedState(env,u);const q=state.quotes?.find(q=>q.id===id);if(!q)fail('Tilbuddet blev ikke fundet.',404);
@@ -24,7 +32,7 @@ async function handleQuoteRoutes(request,env,u){
  if(!emailPattern.test(String(body.to||''))||body.to.length>254||typeof body.subject!=='string'||!body.subject.trim()||body.subject.length>200||/[\r\n]/.test(body.subject)||typeof body.message!=='string'||body.message.length>6000)return json({error:'Kontroller modtager, emne og besked.'},400);
  if(action==='email')await audit(env,u,'quote.email',id);
  if(action==='mail-draft'){const pdf=await createQuotePdf(q,company);return new Response(mimeDraft(q,company,body,pdf),{headers:{'Content-Type':'message/rfc822','Content-Disposition':'attachment; filename="'+quoteFileName(q).replace('.pdf','.eml')+'"','Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}})}
- if(!env.RESEND_API_KEY||!env.MAIL_FROM)return json({error:'Automatisk mailafsendelse er ikke tilsluttet. Hent en mailkladde med PDF, og send den fra dit mailprogram.',code:'mail_not_configured'},503);
+ if(!mailConfigured(env))return json({error:'Automatisk mailafsendelse er ikke tilsluttet. Hent en mailkladde med PDF, og send den fra dit mailprogram.',code:'mail_not_configured'},503);
  if(q.status==='Kladde')return json({error:'Gør tilbuddet klar, før det sendes. Tilbudspriserne skal være låst.'},409);
  if(!/^[0-9a-f-]{36}$/.test(body.requestId||''))return json({error:'Afsendelses-id mangler.'},400);
  const attemptKey='gardening-business/mail-attempts/'+body.requestId+'.json';
@@ -34,8 +42,7 @@ async function handleQuoteRoutes(request,env,u){
  const receipt={requestId:body.requestId,quoteId:id,to:body.to,subject:body.subject,hash,status:'pending',createdAt:new Date().toISOString()};
  const claim=await env.BUCKET.put(attemptKey,JSON.stringify(receipt),{onlyIf:{etagDoesNotMatch:'*'}});if(!claim)return json({error:'Afsendelsen behandles allerede. Der sendes ikke en ekstra mail.'},409);
  try{
-  const pdf=await createQuotePdf(q,company);const provider=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+env.RESEND_API_KEY,'Content-Type':'application/json','Idempotency-Key':'quote/'+body.requestId},body:JSON.stringify({from:env.MAIL_FROM,to:[body.to],subject:body.subject,text:body.message,attachments:[{filename:quoteFileName(q),content:encodeBytes(pdf)}]}),signal:AbortSignal.timeout(25000)});const result=await provider.json();
-  if(!provider.ok||!result.id){receipt.status='failed';receipt.error='Mailtjenesten afviste afsendelsen. Kontroller opsætning og modtager.';receipt.providerStatus=provider.status}else{receipt.status='accepted';receipt.providerId=result.id;receipt.acceptedAt=new Date().toISOString()}
+  const pdf=await createQuotePdf(q,company);const result=await deliverMail(env,{to:body.to,subject:body.subject,text:body.message,attachments:[{filename:quoteFileName(q),content:encodeBytes(pdf)}],idempotencyKey:'quote/'+body.requestId});Object.assign(receipt,result);
  }catch{receipt.status='unknown';receipt.error='Afsendelsesstatus er ukendt. Kontroller mailtjenesten før en ny afsendelse.'}
  await env.BUCKET.put(attemptKey,JSON.stringify(receipt));await env.BUCKET.put(latestKey,JSON.stringify(receipt));return json({receipt,accepted:receipt.status==='accepted',error:receipt.error},receipt.status==='accepted'?200:502);
 }

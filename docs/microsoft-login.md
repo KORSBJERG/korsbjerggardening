@@ -34,7 +34,9 @@ Microsofts vejledning: [Appregistrering](https://learn.microsoft.com/en-us/entra
 
 ## 2. Mailafsendelse
 
-Opret/tilslut en Resend-afsender på et verificeret domæne. Sæt `RESEND_API_KEY` som secret og `MAIL_FROM` til den verificerede afsender, fx `Korsbjerg Gardening <Gardening@Korsbjerg.dk>`. Begge kræves til direkte invitationer og efterfølgende kundelogin. Hemmeligheder skal indtastes direkte i runtime-indstillingerne, ikke sendes i chat eller lægges i GitHub.
+Brug den eksisterende SMTP2GO-konto. Sæt `MAIL_PROVIDER=smtp2go`, `SMTP2GO_API_KEY` som secret og `MAIL_FROM` til den verificerede afsender, fx `Korsbjerg Gardening <Gardening@Korsbjerg.dk>`. Disse kræves til direkte invitationer og efterfølgende kundelogin. Nøglen behøver kun `/email/send`; deaktiver klik- og åbningssporing, så personlige loginlinks ikke omskrives eller spores. Hemmeligheder skal indtastes direkte i runtime-indstillingerne, ikke sendes i chat eller lægges i GitHub.
+
+Fra **Brugere & adgang** kan driftsbrugeren sende en testmail til den konfigurerede administratoradresse (standard `anton@korsbjerg.dk`). Testen indeholder kun portalens adresse og ingen kundeoplysninger. Kundekonti har ikke adgang til denne handling, og modtageren kan ikke ændres via browserens request.
 
 Fra **Brugere & adgang → Inviter bruger** vælger Anton navn, mail og haver og trykker **Send invitation på mail**. Status betyder accepteret af mailtjenesten, ikke bevis for levering til indbakken. **Opret mailkladde** åbner invitationen i Antons mailprogram; den sender ikke automatisk. I Microsoft-tilstand kan der kun inviteres kunder; administratoren fastlægges i Entra-opsætningen.
 
@@ -50,8 +52,12 @@ Invitationen er gyldig i 48 timer. Kunden bekræfter **Opret min konto** og får
 
 Konfigurationen er kodeklar, men oprettelse af Entra-app, Cloudflare-ressourcer, dataflytning og verificering af mailafsender kræver adgang til de pågældende konti. De er ikke udført af implementeringen.
 
-[Cloudflare D1-migrationer](https://developers.cloudflare.com/d1/reference/migrations/). [Resend mailafsendelse](https://resend.com/docs/api-reference/emails/send-email).
+[Cloudflare D1-migrationer](https://developers.cloudflare.com/d1/reference/migrations/). [SMTP2GO mailafsendelse](https://developers.smtp2go.com/docs/send-an-email), [PDF-vedhæftninger](https://developers.smtp2go.com/docs/adding-attachments), [regionale endpoints](https://developers.smtp2go.com/docs/endpoints).
+
+Appen bruger SMTP2GOs faste EU-endpoint. `korsbjerg.dk` skal godkendes som senderdomæne, da den eksisterende DMARC-politik afviser enkeltafsender-godkendelse. Tilføj de tre nye CNAME-poster fra SMTP2GO uden at ændre eksisterende MX-, SPF- eller DMARC-poster. API-nøgler og private certifikatnøgler må aldrig indgå i kildekode eller GitHub.
+
+Afsendelser registreres før provider-kaldet. SMTP2GO kaldes én gang; samme transaktions-id kan ikke skabe en ekstra mail. Et timeout eller uklart svar markeres som ukendt og genafsendes ikke automatisk. Kontroller SMTP2GO Activity, før en ny afsendelse oprettes. Resend understøttes fortsat til ældre konfigurationer; den valgte provider ændres ikke automatisk ved fejl.
 
 ## Kontrol
 
-`node scripts/test-all.mjs` omfatter den eksisterende portal og den nye loginmodel. Microsoft-signaturer og PS256-client assertions testes med et lokalt RSA-nøglepar og falske provider-responser; mails simuleres. Ingen rigtige kundemails udsendes af testene. Testene dokumenterer ikke, at den endnu ikke konfigurerede Microsoft/Resend-integration fungerer i produktion.
+`node scripts/test-all.mjs` omfatter den eksisterende portal og den nye loginmodel. Microsoft-signaturer og PS256-client assertions testes med et lokalt RSA-nøglepar og falske provider-responser; mails simuleres. Ingen rigtige kundemails udsendes af testene. Testene dokumenterer ikke, at den endnu ikke konfigurerede Microsoft/SMTP2GO-integration fungerer i produktion.

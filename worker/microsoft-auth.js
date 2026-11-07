@@ -55,10 +55,7 @@ async function verifyMicrosoftToken(token,env,nonce,keySet){
  if(payload.nonce!==nonce||payload.tid?.toLowerCase()!==tenant||payload.oid?.toLowerCase()!==env.MS_ADMIN_OBJECT_ID.toLowerCase())fail('Denne Microsoft-konto har ikke administratoradgang.',403);
  return payload;
 }
-async function authEmail(env,to,subject,text,id){
- if(!env.RESEND_API_KEY||!env.MAIL_FROM)fail('Mailafsendelse er ikke tilsluttet endnu. Brug en mailkladde til invitationer.',503);
- let r;try{r=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+env.RESEND_API_KEY,'Content-Type':'application/json','Idempotency-Key':'portal/'+id},body:JSON.stringify({from:env.MAIL_FROM,to:[to],subject,text}),signal:AbortSignal.timeout(15000)});const data=await r.json();if(!r.ok||!data.id)throw Error();return data.id}catch{fail('Mailtjenesten kunne ikke bekræfte afsendelsen. Kontroller afsendelsesoversigten før du prøver igen.',502)}
-}
+async function authEmail(env,to,subject,text,id){return transactionalMail(env,{to,subject,text,idempotencyKey:'portal/'+id})}
 async function acceptCustomerInvitation(request,env,body){
  const hash=typeof body.token==='string'&&/^[a-f0-9]{64}$/.test(body.token)?await digest(body.token):'';
  const invite=await query(env,'SELECT * FROM portal_invitations WHERE token_hash=?',hash).first();
@@ -113,7 +110,7 @@ async function handleExternalAuth(request,env){
   const email=String(body.email||'').trim().toLowerCase();if(!emailPattern.test(email)||email.length>254)fail('Angiv en gyldig mailadresse.');
   // Same response for unknown, blocked and known accounts; no account enumeration.
   const reply=()=>json({ok:true,message:'Hvis mailadressen har adgang, får du et loginlink. Tjek også uønsket mail.'});
-  if(!env.RESEND_API_KEY||!env.MAIL_FROM)fail('Kundelogin via mail er ikke tilsluttet endnu. Kontakt Anton.',503);
+  if(!mailConfigured(env))fail('Kundelogin via mail er ikke tilsluttet endnu. Kontakt Anton.',503);
   const existing=await query(env,"SELECT * FROM portal_users WHERE email=? AND role='customer' AND active=1",email).first();
   await limit(env,{id:'email_'+await digest(email)},'login',1);
   if(existing){const token=secretToken(),hash=await digest(token);await query(env,"INSERT INTO portal_auth_tokens(token_hash,kind,user_id,expires_at) VALUES (?,'customer',?,?)",hash,existing.id,now()+900000).run();
