@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';import {readFile,access} from 'node:fs/promises';
 import cloudflare from '../worker/cloudflare.js';
 const config=JSON.parse(await readFile('wrangler.jsonc','utf8'));
+assert.equal(config.keep_vars,true);assert.equal(config.d1_databases[0].binding,'DB');assert.equal(config.r2_buckets[0].jurisdiction,'eu');assert(!config.vars.PORTAL_AUTH_MODE,'Microsoft login is activated separately after migration');
 assert.equal(config.main,'worker/cloudflare.js');assert.equal(config.build.command,'node scripts/build-custom.mjs');await access(config.main);await access('dist/server/index.js');
 const origin='https://gardening.example';
 for(const path of ['/','/haekklipning','/sitemap.xml','/robots.txt','/brand-logo.png']){

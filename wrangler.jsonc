@@ -8,5 +8,21 @@
   },
   "vars": {
     "PORTAL_ORIGIN": "https://antons-korsbjerg-gardening.peaknet.chatgpt.site"
-  }
+  },
+  "keep_vars": true,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "korsbjerg-gardening-portal",
+      "database_id": "32fe6415-62d9-439f-be20-1a4cff23646d",
+      "migrations_dir": "drizzle"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "BUCKET",
+      "bucket_name": "korsbjerg-gardening-portal",
+      "jurisdiction": "eu"
+    }
+  ]
 }
