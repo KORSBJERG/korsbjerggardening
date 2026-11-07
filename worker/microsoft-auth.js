@@ -2,7 +2,17 @@
 // own identity integration while the existing private deployment is in use.
 const externalLogin=env=>env.PORTAL_AUTH_MODE==='microsoft';
 const guid=v=>typeof v==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(v);
-function entraReady(env){return !!(guid(env.MS_TENANT_ID)&&guid(env.MS_CLIENT_ID)&&guid(env.MS_ADMIN_OBJECT_ID)&&env.MS_CLIENT_SECRET)}
+function entraReady(env){return !!(guid(env.MS_TENANT_ID)&&guid(env.MS_CLIENT_ID)&&guid(env.MS_ADMIN_OBJECT_ID)&&(env.MS_CLIENT_SECRET||env.MS_CLIENT_PRIVATE_KEY&&/^[A-Za-z0-9_-]{43}$/.test(env.MS_CLIENT_CERT_SHA256||'')))}
+async function microsoftClientCredential(env){
+ if(env.MS_CLIENT_PRIVATE_KEY){
+  if(!/^[A-Za-z0-9_-]{43}$/.test(env.MS_CLIENT_CERT_SHA256||''))fail('Microsoft-certifikatet mangler korrekt SHA-256-fingeraftryk.',503);
+  const key=await PortalJOSE.importPKCS8(env.MS_CLIENT_PRIVATE_KEY.replaceAll('\\n','\n'),'PS256'),time=Math.floor(now()/1000);
+  const assertion=await new PortalJOSE.SignJWT({}).setProtectedHeader({alg:'PS256',typ:'JWT','x5t#S256':env.MS_CLIENT_CERT_SHA256}).setIssuer(env.MS_CLIENT_ID).setSubject(env.MS_CLIENT_ID).setAudience('https://login.microsoftonline.com/'+env.MS_TENANT_ID+'/oauth2/v2.0/token').setJti(crypto.randomUUID()).setIssuedAt(time).setNotBefore(time-30).setExpirationTime(time+300).sign(key);
+  return {client_assertion_type:'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',client_assertion:assertion};
+ }
+ if(env.MS_CLIENT_SECRET)return {client_secret:env.MS_CLIENT_SECRET};
+ fail('Microsoft-login mangler et certifikat.',503);
+}
 function portalOrigin(request,env){
  let configured;try{configured=new URL(env.PORTAL_PUBLIC_ORIGIN)}catch{fail('Portalens adresse er ikke tilsluttet.',503)}
  if(configured.protocol!=='https:'||configured.username||configured.password||configured.pathname!=='/'||configured.search||configured.hash||configured.origin!==new URL(request.url).origin)fail('Portalens adresse er ikke korrekt tilsluttet.',503);
@@ -87,7 +97,7 @@ async function handleExternalAuth(request,env){
   const row=state&&/^[a-f0-9]{64}$/.test(state)?await query(env,"SELECT * FROM portal_auth_tokens WHERE token_hash=? AND kind='oauth'",await digest(state)).first():null;
   if(!row||!binding||JSON.parse(row.payload).binding!==await digest(binding))fail('Loginforsøget passer ikke til denne browser. Start igen.',403);
   await claimAuthToken(env,state,'oauth');const data=JSON.parse(row.payload),code=url.searchParams.get('code');if(!code||code.length>10000||url.searchParams.has('error'))fail('Microsoft-login blev afbrudt. Start igen.',403);
-  const response=await fetch('https://login.microsoftonline.com/'+env.MS_TENANT_ID+'/oauth2/v2.0/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({client_id:env.MS_CLIENT_ID,client_secret:env.MS_CLIENT_SECRET,grant_type:'authorization_code',code,code_verifier:data.verifier,redirect_uri:origin+'/auth/microsoft/callback'}),signal:AbortSignal.timeout(15000)});
+  const response=await fetch('https://login.microsoftonline.com/'+env.MS_TENANT_ID+'/oauth2/v2.0/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({client_id:env.MS_CLIENT_ID,...await microsoftClientCredential(env),grant_type:'authorization_code',code,code_verifier:data.verifier,redirect_uri:origin+'/auth/microsoft/callback'}),signal:AbortSignal.timeout(15000)});
   const tokens=await response.json();if(!response.ok||!tokens.id_token)fail('Microsoft kunne ikke bekræfte login. Start igen.',403);
   const claims=await verifyMicrosoftToken(tokens.id_token,env,data.nonce),id='microsoft_'+claims.tid.toLowerCase()+'_'+claims.oid.toLowerCase();
   await query(env,"INSERT OR IGNORE INTO portal_users(id,email,name,role,can_operate,active,gardens,created_at,updated_at) VALUES (?,?,?,'administrator',1,1,'[]',?,?)",id,(env.MS_ADMIN_EMAIL||'anton@korsbjerg.dk').toLowerCase(),'Anton Korsbjerg',now(),now()).run();

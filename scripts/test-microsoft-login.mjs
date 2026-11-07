@@ -2,13 +2,19 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {fixture} from './portal-test-support.mjs';
 const source=readFileSync('dist/server/index.js','utf8');
-const {verifyMicrosoftToken,PortalJOSE}=await import('data:text/javascript;base64,'+Buffer.from(source+'\nexport {verifyMicrosoftToken,PortalJOSE};').toString('base64'));
+const {verifyMicrosoftToken,PortalJOSE,microsoftClientCredential}=await import('data:text/javascript;base64,'+Buffer.from(source+'\nexport {verifyMicrosoftToken,PortalJOSE,microsoftClientCredential};').toString('base64'));
 const f=await fixture({gardens:[{id:'g1',name:'Garden 1',address:'Test 1',customer:'A',area:10,budget:5},{id:'g2',name:'Garden 2',address:'Test 2',customer:'B',area:20,budget:5}]});
 const env={...f.env,PORTAL_AUTH_MODE:'microsoft',PORTAL_PUBLIC_ORIGIN:'https://example.test',MS_TENANT_ID:'11111111-1111-4111-8111-111111111111',MS_CLIENT_ID:'22222222-2222-4222-8222-222222222222',MS_ADMIN_OBJECT_ID:'33333333-3333-4333-8333-333333333333',MS_ADMIN_EMAIL:'anton@korsbjerg.dk',MS_CLIENT_SECRET:'mock-secret',RESEND_API_KEY:'mock-mail',MAIL_FROM:'Gardening <gardening@example.test>'};
 const pair=await crypto.subtle.generateKey({name:'RSASSA-PKCS1-v1_5',modulusLength:2048,publicExponent:new Uint8Array([1,0,1]),hash:'SHA-256'},true,['sign','verify']);
 const jwk={...await crypto.subtle.exportKey('jwk',pair.publicKey),kid:'test-key',alg:'RS256',use:'sig'},keySet=PortalJOSE.createLocalJWKSet({keys:[jwk]});
 function claims(nonce){return {iss:'https://login.microsoftonline.com/'+env.MS_TENANT_ID+'/v2.0',aud:env.MS_CLIENT_ID,tid:env.MS_TENANT_ID,oid:env.MS_ADMIN_OBJECT_ID,sub:'test-subject',nonce,iat:Math.floor(Date.now()/1000),exp:Math.floor(Date.now()/1000)+300}}
 async function jwt(c){const head=Buffer.from(JSON.stringify({alg:'RS256',kid:jwk.kid})).toString('base64url'),body=Buffer.from(JSON.stringify(c)).toString('base64url'),input=head+'.'+body;return input+'.'+Buffer.from(await crypto.subtle.sign('RSASSA-PKCS1-v1_5',pair.privateKey,new TextEncoder().encode(input))).toString('base64url')}
+const certPair=await crypto.subtle.generateKey({name:'RSA-PSS',modulusLength:2048,publicExponent:new Uint8Array([1,0,1]),hash:'SHA-256'},true,['sign','verify']);
+const privatePem='-----BEGIN PRIVATE KEY-----\n'+Buffer.from(await crypto.subtle.exportKey('pkcs8',certPair.privateKey)).toString('base64').match(/.{1,64}/g).join('\n')+'\n-----END PRIVATE KEY-----';
+const certEnv={...env,MS_CLIENT_SECRET:'',MS_CLIENT_PRIVATE_KEY:privatePem,MS_CLIENT_CERT_SHA256:'a'.repeat(43)};
+const credential=await microsoftClientCredential(certEnv);assert(!credential.client_secret);assert.equal(credential.client_assertion_type,'urn:ietf:params:oauth:client-assertion-type:jwt-bearer');
+const assertion=await PortalJOSE.jwtVerify(credential.client_assertion,certPair.publicKey,{algorithms:['PS256'],issuer:env.MS_CLIENT_ID,audience:'https://login.microsoftonline.com/'+env.MS_TENANT_ID+'/oauth2/v2.0/token'});assert.equal(assertion.payload.sub,env.MS_CLIENT_ID);assert.equal(assertion.protectedHeader['x5t#S256'],certEnv.MS_CLIENT_CERT_SHA256);assert(assertion.payload.exp-assertion.payload.iat<=300);assert.notEqual((await microsoftClientCredential(certEnv)).client_assertion,credential.client_assertion);
+await assert.rejects(()=>microsoftClientCredential({...certEnv,MS_CLIENT_CERT_SHA256:'invalid'}));
 await verifyMicrosoftToken(await jwt(claims('nonce')),env,'nonce',keySet);
 for(const changes of [{aud:'wrong-client'},{iss:'https://evil.test'},{tid:'wrong-tenant'},{oid:'wrong-object'},{nonce:'wrong-nonce'},{exp:1}])await assert.rejects(()=>jwt({...claims('nonce'),...changes}).then(t=>verifyMicrosoftToken(t,env,'nonce',keySet)));
 assert.equal((await f.worker.fetch(new Request('https://example.test/api/me',{headers:{'oai-authenticated-user-id':'owner','oai-authenticated-user-email':'owner@example.test'}}),env)).status,401);

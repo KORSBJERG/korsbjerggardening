@@ -22,12 +22,15 @@ Registrér i Cloudflares runtime-indstillinger:
 | `MS_CLIENT_ID` | Application (client) ID |
 | `MS_ADMIN_OBJECT_ID` | **Brugerens** Object ID for `anton@korsbjerg.dk` under Entra → Users. Ikke appens Object ID. |
 | `MS_ADMIN_EMAIL` | `anton@korsbjerg.dk` |
-| `MS_CLIENT_SECRET` | Ny client secret-værdi fra appregistreringen; opbevar som Cloudflare-secret |
+| `MS_CLIENT_PRIVATE_KEY` | Privat RSA-nøgle i PKCS#8 PEM-format; kun som Cloudflare-secret |
+| `MS_CLIENT_CERT_SHA256` | Base64url-kodet SHA-256-fingeraftryk af certifikatets DER-data |
 | `PORTAL_PUBLIC_ORIGIN` | `https://korsbjerggardening.peter-be8.workers.dev` |
 
-Administratoradgang afgøres af det signerede tenant-id og Antons uforanderlige bruger-Object ID, ikke af en mailadresse sendt fra browseren. Tokenkontrol bruger den medfølgende `jose`-pakke, RS256, fast Microsoft-issuer/JWKS, audience, levetid og nonce. OAuth bruger PKCE, et browserbundet state-cookie og engangs-state. Microsoft-token og client secret sendes aldrig til browseren eller kundemails. MFA styres i Microsoft 365.
+I Korsbjergs tenant blokerer den eksisterende politik klienthemmeligheder. Brug derfor certifikat under **Certificates & secrets → Certificates → Upload certificate**. Upload kun det offentlige `.cer`-certifikat. Gem den tilhørende private nøgle som runtime-secret `MS_CLIENT_PRIVATE_KEY` i Cloudflare. Ændr ikke tenant-politikken. Koden sender en kortlivet PS256-signeret client assertion med `x5t#S256`, audience, issuer, subject og et unikt jti. Certifikatet skal roteres før udløb; upload et nyt offentligt certifikat og skift runtime-nøgle/fingeraftryk samlet. Fallback `MS_CLIENT_SECRET` findes kun til miljøer, hvor politikken tillader det; den bruges ikke, når en privat nøgle er konfigureret.
 
-Microsofts vejledning: [Appregistrering](https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app), [OpenID Connect](https://learn.microsoft.com/en-us/entra/identity-platform/v2-protocols-oidc).
+Administratoradgang afgøres af det signerede tenant-id og Antons uforanderlige bruger-Object ID, ikke af en mailadresse sendt fra browseren. Tokenkontrol bruger den medfølgende `jose`-pakke, RS256, fast Microsoft-issuer/JWKS, audience, levetid og nonce. OAuth bruger PKCE, et browserbundet state-cookie og engangs-state. Microsoft-token og privat nøgle sendes aldrig til browseren eller kundemails. MFA styres i Microsoft 365.
+
+Microsofts vejledning: [Appregistrering](https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app), [OpenID Connect](https://learn.microsoft.com/en-us/entra/identity-platform/v2-protocols-oidc), [certifikatbaserede credentials](https://learn.microsoft.com/en-us/entra/identity-platform/certificate-credentials).
 
 ## 2. Mailafsendelse
 
@@ -51,4 +54,4 @@ Konfigurationen er kodeklar, men oprettelse af Entra-app, Cloudflare-ressourcer,
 
 ## Kontrol
 
-`node scripts/test-all.mjs` omfatter den eksisterende portal og den nye loginmodel. Microsoft-signaturer testes med et lokalt RSA-nøglepar og falske provider-responser; mails simuleres. Ingen rigtige kundemails udsendes af testene. Testene dokumenterer ikke, at den endnu ikke konfigurerede Microsoft/Resend-integration fungerer i produktion.
+`node scripts/test-all.mjs` omfatter den eksisterende portal og den nye loginmodel. Microsoft-signaturer og PS256-client assertions testes med et lokalt RSA-nøglepar og falske provider-responser; mails simuleres. Ingen rigtige kundemails udsendes af testene. Testene dokumenterer ikke, at den endnu ikke konfigurerede Microsoft/Resend-integration fungerer i produktion.
