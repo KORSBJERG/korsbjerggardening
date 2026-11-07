@@ -2,7 +2,7 @@ import { html } from './ui.js';
 const json=(v,status=200,headers={})=>Response.json(v,{status,headers:{'Cache-Control':'no-store','X-Robots-Tag':'noindex, nofollow',...headers}});
 export default {async fetch(request,env){
  const url=new URL(request.url);
- try{const response=await handlePortalRoutes(request,env);if(response)return response;}catch(error){return json({error:error instanceof PortalError?error.message:'Handlingen kunne ikke gennemføres. Prøv igen.'},error instanceof PortalError?error.status:503)}
+ try{const auth=await handleExternalAuth(request,env);if(auth)return auth;const response=await handlePortalRoutes(request,env);if(response)return response;}catch(error){return json({error:error instanceof PortalError?error.message:'Handlingen kunne ikke gennemføres. Prøv igen.'},error instanceof PortalError?error.status:503)}
  if(url.pathname==='/brand-logo.png'&&request.method==='GET')return new Response(Uint8Array.from(atob(logoBase64),c=>c.charCodeAt(0)),{headers:{'Content-Type':'image/png','Cache-Control':'public, max-age=86400','X-Content-Type-Options':'nosniff'}});
  if(!['GET','HEAD'].includes(request.method))return new Response('Not found',{status:404});
  let origin=url.origin;try{if(env.PUBLIC_SITE_URL){const configured=new URL(env.PUBLIC_SITE_URL);if(configured.protocol==='https:'&&!configured.username&&!configured.password)origin=configured.origin}}catch{}
@@ -11,12 +11,13 @@ export default {async fetch(request,env){
  if(url.pathname==='/sitemap.xml')return new Response('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'+['/',...Object.keys(seoDocuments)].map(path=>'<url><loc>'+origin+path+'</loc></url>').join('')+'</urlset>',{headers:{'Content-Type':'application/xml; charset=utf-8','Cache-Control':'public, max-age=3600'}});
  const office=url.pathname==='/kontor'||url.pathname.startsWith('/kontor/')||url.pathname==='/app'||url.pathname.startsWith('/app/');
  if(url.pathname!=='/'&&!office&&!seoDocuments[url.pathname])return new Response('<!doctype html><html lang="da"><meta charset="utf-8"><title>Siden findes ikke</title><body style="background:#f5f4ec;color:#203e32;font:22px Georgia;padding:10vw"><h1>Siden findes ikke.</h1><p><a href="/">Tilbage til Korsbjerg Gardening</a></p></body></html>',{status:404,headers:{'Content-Type':'text/html; charset=utf-8','X-Robots-Tag':'noindex'}});
- if(office&&!(url.pathname.startsWith('/app')&&!request.headers.get('oai-authenticated-user-id'))){
+ if(office&&externalLogin(env)){try{const u=await externalPrincipal(request,env);if(url.pathname.startsWith('/kontor')&&u.role==='customer')return new Response(null,{status:302,headers:{Location:'/app','Cache-Control':'no-store'}})}catch{return new Response(null,{status:302,headers:{Location:'/login','Cache-Control':'no-store'}})}}
+ if(office&&!externalLogin(env)&&!(url.pathname.startsWith('/app')&&!request.headers.get('oai-authenticated-user-id'))){
   if(!request.headers.get('oai-authenticated-user-id'))return new Response(null,{status:302,headers:{Location:'/signin-with-chatgpt?return_to='+encodeURIComponent(url.pathname),'Cache-Control':'no-store'}});
   try{const u=await principal(request,env,{allowUnregistered:true});
    if((url.pathname==='/kontor'||url.pathname.startsWith('/kontor/'))&&(u.unregistered||u.role==='customer'))return new Response(null,{status:302,headers:{Location:'/app','Cache-Control':'no-store'}});
   }catch(error){return new Response('Adgang afvist. '+(error instanceof PortalError?error.message:'Adgangskontrollen er ikke tilgængelig.'),{status:error instanceof PortalError?error.status:503,headers:{'Cache-Control':'no-store','Content-Type':'text/plain; charset=utf-8'}})}
  }
- const document=office?html:(seoDocuments[url.pathname]||frontHtml).replaceAll('__SITE_ORIGIN__',origin);
+ const document=office?html.replace('<script>','<script>const PORTAL_LOGIN_MODE='+JSON.stringify(externalLogin(env)?'microsoft':'sites')+';'):(seoDocuments[url.pathname]||frontHtml).replaceAll('__SITE_ORIGIN__',origin);
  return new Response(request.method==='HEAD'?null:document,{headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':office?'no-store':'public, max-age=0, must-revalidate','X-Content-Type-Options':'nosniff','Referrer-Policy':office?'no-referrer':'strict-origin-when-cross-origin','X-Frame-Options':'DENY',...(office?{'Content-Security-Policy':"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://images.unsplash.com https://static.wixstatic.com; media-src https://video.wixstatic.com; frame-src https://www.google.com; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"}:{}),...(office?{'X-Robots-Tag':'noindex, nofollow'}:{})}});
 }};

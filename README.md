@@ -53,6 +53,10 @@ Kontrollerne bygger først Worker-filen og tester derefter routes, datalagring o
 
 Mappen `app/`, komponentbiblioteket og de øvrige framework-filer er bevaret fra det oprindelige starterprojekt. Det aktive build er `scripts/build-custom.mjs`; det skriver den selvstændige Worker til `dist/server/index.js`.
 
+## Microsoft 365-login og kundeinvitationer
+
+Microsoft-login for `anton@korsbjerg.dk` og kundelogin via engangsmails er implementeret som en særskilt, endnu ikke aktiveret Cloudflare-portaltilstand. Invitationer kan sendes direkte via den konfigurerede mailtjeneste eller åbnes som mailkladde. Den nuværende Sites-loginmodel bevares indtil Microsoft-app, mail og datamigrering er klar. Se den konkrete opsætning i [docs/microsoft-login.md](docs/microsoft-login.md). Ingen Microsoft-hemmeligheder eller mailnøgler er med i repositoryet.
+
 ## Data, login og adgang
 
 Sites håndterer identitet og login. Worker-koden kontrollerer særskilt adgang på serveren ved hvert beskyttet kald. Den separate Cloudflare Worker indeholder fortsat ingen app-/databindinger og viderestiller `/app` og `/kontor` til Sites.
@@ -69,9 +73,9 @@ D1-bindingen `DB` indeholder brugere, havemedlemskaber, invitationer, sessioner,
 
 Ved ejerens første indlæsning importeres eksisterende `gardening/<Sites-bruger-id>.json` fra R2 til D1. Originalen ændres ikke. En ekstra skrivebeskyttet-førstegangsbackup gemmes i `gardening-backups/access-v1/`. Data under andre loginidentiteter sammenflettes ikke automatisk. Ingen eksempeldata indsættes, hvis ejerens R2-fil er tom. Eksisterende mailhistorik bliver liggende uændret under sine oprindelige R2-nøgler; nye afsendelser gemmes fælles under `gardening-business/`.
 
-En kunde inviteres fra **Brugere & adgang**: vælg login-e-mail og præcise haver, opret link og send det selv. Linket udløber efter 48 timer og kan kun bruges én gang af den inviterede verificerede e-mail. Kun tokenhashen gemmes. Linket bruger URL-fragment; portalen sender ingen referrer. Invitationslinks udsendes ikke automatisk. Hvis Sites-audiencen fortsat er privat, skal besøgende også være tilladt af Sites; en applikationsinvitation ophæver ikke platformens adgangspolitik.
+En kunde inviteres fra **Brugere & adgang**: vælg login-e-mail og præcise haver, send invitationen via den konfigurerede mailtjeneste eller opret en mailkladde. Linket udløber efter 48 timer og kan kun bruges én gang af den inviterede verificerede e-mail. Kun tokenhashen gemmes. Linket bruger URL-fragment; portalen sender ingen referrer. Direkte mailafsendelse kræver en konfigureret mailtjeneste. Hvis Sites-audiencen fortsat er privat, skal besøgende også være tilladt af Sites; en applikationsinvitation ophæver ikke platformens adgangspolitik.
 
-App-sessioner er bundet til den aktuelle Sites-identitet med Secure/HttpOnly/SameSite-cookies, CSRF-token og streng Origin-kontrol. Medarbejdersessioner har 8 timers maksimum og 30 minutters inaktivitet; kundesessioner har 7 dages maksimum og 24 timers inaktivitet. Sites-login er fortsat den overordnede login-session; en ny app-session for en allerede Sites-indlogget bruger er ikke en garanti for ny MFA. MFA/passkeys skal aktiveres på login-kontoen; denne kode kan ikke konfigurere eller attestere Sites/ChatGPT MFA. Ingen OAuth-provider eller kodebaseret adgangskode er tilføjet.
+App-sessioner er bundet til den aktuelle Sites-identitet med Secure/HttpOnly/SameSite-cookies, CSRF-token og streng Origin-kontrol. Medarbejdersessioner har 8 timers maksimum og 30 minutters inaktivitet; kundesessioner har 7 dages maksimum og 24 timers inaktivitet. Sites-login er fortsat den overordnede login-session; en ny app-session for en allerede Sites-indlogget bruger er ikke en garanti for ny MFA. MFA/passkeys skal aktiveres på login-kontoen; denne kode kan ikke konfigurere eller attestere Sites/ChatGPT MFA. I Sites-tilstanden bruges fortsat kun platformens identitet. Den særskilte Microsoft-tilstand og nødvendige aktivering er beskrevet ovenfor.
 
 Spærring og ændrede haver/roller kontrolleres ved næste kald, og eksisterende app-sessioner tilbagekaldes ved adgangsændringer. Kontorets bulk-save kræver driftsadgang og versionskontrol; kunder har kun afgrænsede operationsendpoints. Tilbudssnapshots er låst efter publicering. Nye beskeder, tilbudssvar og ind-/udtjekning stemples på serveren. Historiske og manuelt rettede tidsregistreringer er driftsfunktioner; noter offentliggøres kun efter eksplicit valg.
 

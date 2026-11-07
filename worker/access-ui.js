@@ -7,11 +7,12 @@ async function apiAction(path,body={}){
  const response=await apiFetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
  const data=await response.json();if(!response.ok)throw Error(data.error||'Handlingen kunne ikke gennemføres.');return data;
 }
-function loginLink(){return '/signin-with-chatgpt?return_to='+encodeURIComponent('/app'+location.hash)}
+function microsoftLoginMode(){return typeof PORTAL_LOGIN_MODE!=='undefined'&&PORTAL_LOGIN_MODE==='microsoft'}
+function loginLink(){if(microsoftLoginMode())return '/login'+location.hash;return '/signin-with-chatgpt?return_to='+encodeURIComponent('/app'+location.hash)}
 function accessGate(message,signIn=false){
  document.getElementById('sidebar').innerHTML='<a class="brand" href="/"><img class="brand-logo" src="/brand-logo.png" alt="Korsbjerg Gardening"></a>';
  document.getElementById('topbar').innerHTML='';
- document.getElementById('main').innerHTML='<div class="heading"><div><div class="eyebrow">KORSBJERG GARDENING</div><h1>Dit personlige arbejdsrum</h1><p>'+esc(message)+'</p></div></div><div class="panel panelpad">'+(signIn?'<a class="btn" target="_top" href="'+esc(loginLink())+'">Log ind med ChatGPT</a>':'<button class="btn" data-action="reload">Prøv igen</button>')+' <a class="btn light" href="/">Til hjemmesiden</a> <a class="textbtn" target="_top" href="/signout-with-chatgpt?return_to=%2Fapp">Skift konto</a></div>';
+ document.getElementById('main').innerHTML='<div class="heading"><div><div class="eyebrow">KORSBJERG GARDENING</div><h1>Dit personlige arbejdsrum</h1><p>'+esc(message)+'</p></div></div><div class="panel panelpad">'+(signIn?'<a class="btn" target="_top" href="'+esc(loginLink())+'">'+(microsoftLoginMode()?'Log ind i haveportalen':'Log ind med ChatGPT')+'</a>':'<button class="btn" data-action="reload">Prøv igen</button>')+' <a class="btn light" href="/">Til hjemmesiden</a> <a class="textbtn" target="_top" href="'+(microsoftLoginMode()?'/login':'/signout-with-chatgpt?return_to=%2Fapp')+'">Skift konto</a></div>';
 }
 async function refreshPortal(){
  const r=await apiFetch('/api/state'),data=await r.json();if(!r.ok)throw Error(data.error);state=data.state;etag=data.etag;
@@ -39,8 +40,8 @@ function save(){
  }catch(e){storageError=e.message;status('Ikke gemt');toast(e.message+' Genindlæs for at hente de gemte data.');return false}});return saveQueue;
 }
 function invitationForm(){
- const admin=me.role==='administrator';
- modal('Inviter til Korsbjerg Gardening','<form id="accessInviteForm"><div class="formgrid">'+input('Navn','name','','text','maxlength="100"')+input('E-mail til login','email','','email','maxlength="254"')+(admin?commerceSelect('Adgang','role',[['customer','Kunde'],['anton','Anton / driftsansvarlig'],['administrator','Administrator']],'customer'):'<input type="hidden" name="role" value="customer">')+'</div><p>Vælg kundens haver. Flere personer kan inviteres til samme have.</p>'+state.gardens.map(g=>'<label class="checkout-complete"><input type="checkbox" name="gardens" value="'+esc(g.id)+'"> '+esc(g.name)+' · '+esc(g.customer)+'</label>').join('')+(admin?'<label class="checkout-complete"><input type="checkbox" name="canOperate"> Giv også administratoren adgang til havekontorets data</label>':'')+'<p class="checkout-help">Invitationen virker kun med den angivne login-e-mail og udløber efter 48 timer. Du får et link, som du selv kan sende.</p><div class="modal-actions"><button class="btn">Opret invitationslink</button></div></form>');
+ const admin=me.role==='administrator'&&!microsoftLoginMode();
+ modal('Inviter til Korsbjerg Gardening','<form id="accessInviteForm"><div class="formgrid">'+input('Navn','name','','text','maxlength="100"')+input('E-mail til login','email','','email','maxlength="254"')+(admin?commerceSelect('Adgang','role',[['customer','Kunde'],['anton','Anton / driftsansvarlig'],['administrator','Administrator']],'customer'):'<input type="hidden" name="role" value="customer">')+'</div><p>Vælg kundens haver. Flere personer kan inviteres til samme have.</p>'+state.gardens.map(g=>'<label class="checkout-complete"><input type="checkbox" name="gardens" value="'+esc(g.id)+'"> '+esc(g.name)+' · '+esc(g.customer)+'</label>').join('')+(admin?'<label class="checkout-complete"><input type="checkbox" name="canOperate"> Giv også administratoren adgang til havekontorets data</label>':'')+'<p class="checkout-help">Invitationen virker kun med den angivne login-e-mail og udløber efter 48 timer. Kunden får adgang til netop de valgte haver.</p><div class="modal-actions"><button class="btn" type="submit" value="email" '+(!accessData?.mailConfigured?'disabled':'')+'>Send invitation på mail</button><button class="btn light" type="submit" value="draft">Opret mailkladde</button></div></form>');
 }
 function accessPage(){
  if(!accessData&&!accessError){loadAccess();return heading('ADGANG','Brugere og invitationer','Henter adgangsoversigten…')}
@@ -62,7 +63,7 @@ document.addEventListener('click',async e=>{
  if(d.action==='inviteUser'){e.preventDefault();e.stopImmediatePropagation();invitationForm()}
  if(d.accessEdit){e.preventDefault();e.stopImmediatePropagation();editAccess(d.accessEdit)}
  if(d.inviteRevoke){e.preventDefault();e.stopImmediatePropagation();try{await apiAction('/api/access/invitations/'+encodeURIComponent(d.inviteRevoke)+'/revoke');await loadAccess()}catch(error){toast(error.message)}}
- if(d.action==='logout'){e.preventDefault();e.stopImmediatePropagation();try{await apiAction('/api/session/logout')}finally{location.href='/signout-with-chatgpt?return_to=%2F'}}
+ if(d.action==='logout'){e.preventDefault();e.stopImmediatePropagation();try{await apiAction('/api/session/logout')}finally{location.href=microsoftLoginMode()?'/login':'/signout-with-chatgpt?return_to=%2F'}}
  if(d.logPublish){e.preventDefault();e.stopImmediatePropagation();if(!me.canOperate)return;const l=state.logs.find(x=>x.id===d.logPublish);if(l){l.customerVisible=!l.customerVisible;await save();render()}}
 },true);
 document.addEventListener('submit',async e=>{
@@ -73,11 +74,12 @@ document.addEventListener('submit',async e=>{
   try{form.querySelector('button').disabled=true;await apiAction('/api/messages',{garden:selectedGarden,text:new FormData(form).get('text')});await refreshPortal();render();toast('Beskeden er gemt.')}catch(error){toast(error.message);form.querySelector('button').disabled=false}return;
  }
  if(!['accessInviteForm','accessUserForm'].includes(form.id))return;
- e.preventDefault();e.stopImmediatePropagation();const data=new FormData(form),button=form.querySelector('button');button.disabled=true;
- try{const payload={name:data.get('name'),email:data.get('email'),role:data.get('role'),gardens:data.getAll('gardens'),canOperate:data.has('canOperate'),active:data.has('active')};
+ e.preventDefault();e.stopImmediatePropagation();const data=new FormData(form),button=form.querySelector('button');form.querySelectorAll('button[type=submit],button:not([type])').forEach(b=>b.disabled=true);
+ try{const payload={name:data.get('name'),email:data.get('email'),role:data.get('role'),gardens:data.getAll('gardens'),canOperate:data.has('canOperate'),active:data.has('active'),delivery:e.submitter?.value||'draft'};
   if(form.id==='accessInviteForm'){
    const result=await apiAction('/api/access/invitations',payload);await loadAccess();
-   modal('Invitationen er klar','<p>Send dette link til <b>'+esc(payload.email)+'</b>. Det kan bruges én gang og udløber efter 48 timer.</p><label>Invitationslink<input class="input" readonly value="'+esc(result.url)+'" onclick="this.select()"></label><p class="checkout-help">Modtageren skal logge ind med præcis den inviterede e-mail. Linket er ikke sendt automatisk.</p>');
+   const mailText='Hej '+payload.name+'\n\nAnton har inviteret dig til din haveportal. Opret din konto via dette personlige link:\n'+result.url+'\n\nLinket kan bruges én gang og udløber efter 48 timer.\n\nVenlig hilsen\nAnton · Korsbjerg Gardening';
+   modal(result.sent?'Invitationen er sendt':'Invitationen er klar','<p>'+(result.sent?'Mailtjenesten har modtaget invitationen til ':'Send invitationen til ')+'<b>'+esc(payload.email)+'</b>. Linket kan bruges én gang og udløber efter 48 timer.</p><label>Invitationslink<input class="input" readonly value="'+esc(result.url)+'" onclick="this.select()"></label><p class="checkout-help">'+(result.mailError?esc(result.mailError):result.sent?'Kunden kan oprette sin konto via linket i mailen.':'Mailen er ikke sendt endnu.')+'</p>'+(!result.sent?'<a class="btn" href="mailto:'+encodeURIComponent(payload.email)+'?subject='+encodeURIComponent('Invitation til Korsbjerg Gardening')+'&amp;body='+encodeURIComponent(mailText)+'">Åbn invitation i mailprogram</a>':''));
   }else{await apiAction('/api/access/user',{...payload,id:form.dataset.id});close();await loadAccess();toast('Adgangen er opdateret.')}
- }catch(error){toast(error.message);button.disabled=false}
+ }catch(error){toast(error.message);form.querySelectorAll('button[type=submit],button:not([type])').forEach(b=>b.disabled=b.value==='email'&&!accessData?.mailConfigured)}
 },true);

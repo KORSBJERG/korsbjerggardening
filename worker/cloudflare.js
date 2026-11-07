@@ -5,6 +5,10 @@ import gardening from '../dist/server/index.js';
 const defaultPortal='https://antons-korsbjerg-gardening.peaknet.chatgpt.site';
 export default {async fetch(request,env={},ctx){
  const url=new URL(request.url);
+ if(env.PORTAL_AUTH_MODE==='microsoft'){
+  const headers=new Headers(request.headers);for(const name of Array.from(headers.keys()))if(name.startsWith('oai-authenticated-')||name==='oai-sites-authorization')headers.delete(name);
+  return gardening.fetch(new Request(request,{headers}),env,ctx);
+ }
  if(url.pathname==='/api'||url.pathname.startsWith('/api/')){
   return Response.json({error:'App APIs are available only through the authenticated portal.'},{status:404,headers:{'Cache-Control':'no-store','X-Robots-Tag':'noindex, nofollow'}});
  }

@@ -28,6 +28,7 @@ async function readBody(request,max=500000){
  try{return JSON.parse(new TextDecoder().decode(bytes))}catch{fail('Ugyldige JSON-data.')}
 }
 async function principal(request,env,{allowUnregistered=false}={}){
+ if(externalLogin(env))return externalPrincipal(request,env);
  const id=request.headers.get('oai-authenticated-user-id'),email=request.headers.get('oai-authenticated-user-email')?.trim().toLowerCase();
  if(!id||!email)fail('Log ind for at fortsætte.',401);
  if(!env.DB)fail('Adgangsdatabasen er ikke tilsluttet.',503);
@@ -139,15 +140,15 @@ async function invitationAccept(request,env){
 async function handlePortalRoutes(request,env){
  const url=new URL(request.url),path=url.pathname;
  if(!path.startsWith('/api/'))return null;
- if(path==='/api/invitations/accept'&&request.method==='POST')return invitationAccept(request,env);
+ if(path==='/api/invitations/accept'&&request.method==='POST'){if(externalLogin(env))fail('Brug invitationslinket fra din mail.',403);return invitationAccept(request,env);}
  const u=await principal(request,env,{allowUnregistered:path==='/api/me'});
  if(path==='/api/me'&&request.method==='GET'){
   if(u.unregistered)return json({user:null,pending:true,email:u.email});
   const s=await session(request,env,u,true);await query(env,'DELETE FROM portal_sessions WHERE expires_at < ?',now()).run();
-  return json({user:userView(u),csrf:s.csrf,expiresAt:s.expires_at},200,s.setCookie?{'Set-Cookie':s.setCookie}:{});
+  return json({user:{...userView(u),provider:externalLogin(env)?'microsoft':'sites'},csrf:s.csrf,expiresAt:s.expires_at},200,s.setCookie?{'Set-Cookie':s.setCookie}:{});
  }
  if(!['GET','HEAD'].includes(request.method))await writeGuard(request,env,u);else await session(request,env,u);
- if(path==='/api/session/logout'&&request.method==='POST'){await query(env,'DELETE FROM portal_sessions WHERE user_id=?',u.id).run();return json({ok:true},200,{'Set-Cookie':'__Host-gardening=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0'})}
+ if(path==='/api/session/logout'&&request.method==='POST'){if(externalLogin(env))await query(env,'DELETE FROM portal_login_sessions WHERE user_id=?',u.id).run();await query(env,'DELETE FROM portal_sessions WHERE user_id=?',u.id).run();return json({ok:true},200,{'Set-Cookie':'__Host-gardening=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0'})}
  if(path.startsWith('/api/access'))return accessRoutes(request,env,u);
  if(path==='/api/state'){
   const {state,version}=await sharedState(env,u);
@@ -207,14 +208,17 @@ function requireGarden(state,u,id){if(!state.gardens.some(g=>g.id===id)||!operat
 async function accessRoutes(request,env,u){
  const path=new URL(request.url).pathname,isAdmin=u.role==='administrator';
  if(!isAdmin&&!operates(u))fail('Du har ikke adgang til brugeradministration.',403);
+ if(path==='/api/access/export'&&request.method==='GET'){if(!isAdmin)fail('Kun administratoren kan hente en sikkerhedskopi.',403);const snapshot=await sharedState(env,u);await audit(env,u,'state.export','business');const response=json({format:'korsbjerg-portal-state-v1',exportedAt:new Date().toISOString(),...snapshot});response.headers.set('Content-Disposition','attachment; filename="korsbjerg-havekontor-backup.json"');return response;}
  if(path==='/api/access'&&request.method==='GET'){
   const users=(await query(env,'SELECT * FROM portal_users ORDER BY created_at').all()).results;
   const invites=(await query(env,'SELECT id,email,name,role,gardens,expires_at,consumed_by,revoked FROM portal_invitations ORDER BY created_at DESC LIMIT 100').all()).results;
   const events=isAdmin?(await query(env,'SELECT user_id,action,target,created_at FROM portal_audit ORDER BY created_at DESC LIMIT 100').all()).results:[];
-  return json({users:users.filter(x=>isAdmin||x.role==='customer').map(userView),invitations:invites.filter(x=>isAdmin||x.role==='customer').map(x=>({...x,gardens:JSON.parse(x.gardens)})),events});
+  return json({authMode:externalLogin(env)?'microsoft':'sites',mailConfigured:!!(env.RESEND_API_KEY&&env.MAIL_FROM),users:users.filter(x=>isAdmin||x.role==='customer').map(userView),invitations:invites.filter(x=>isAdmin||x.role==='customer').map(x=>({...x,gardens:JSON.parse(x.gardens)})),events});
  }
  if(path==='/api/access/invitations'&&request.method==='POST'){
   await limit(env,u,'invite',10);const body=await readBody(request,6000),role=body.role||'customer';
+  if(externalLogin(env)&&role!=='customer')fail('Medarbejderadgang styres med Microsoft 365.',403);
+  if(body.delivery==='email'&&(!env.RESEND_API_KEY||!env.MAIL_FROM))fail('Mailafsendelse er ikke tilsluttet. Vælg mailkladde.',503);
   if(!['administrator','anton','customer'].includes(role)||!isAdmin&&role!=='customer')fail('Du kan kun invitere kunder.',403);
   if(typeof body.email!=='string'||!emailPattern.test(body.email)||body.email.length>254||typeof body.name!=='string'||!body.name.trim()||body.name.length>100)fail('Kontroller navn og e-mail.');
   const {state}=await sharedState(env,u),gardens=body.gardens;
@@ -222,7 +226,9 @@ async function accessRoutes(request,env,u){
   const email=body.email.trim().toLowerCase();if(await query(env,'SELECT id FROM portal_users WHERE email=?',email).first())fail('Denne bruger findes allerede. Rediger adgang i oversigten.',409);
   const token=secretToken(),id=crypto.randomUUID(),expires=now()+172800000;
   await env.DB.batch([query(env,'INSERT INTO portal_invitations (id,token_hash,email,name,role,can_operate,gardens,expires_at,created_by,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)',id,await digest(token),email,body.name.trim(),role,isAdmin&&role==='administrator'&&body.canOperate?1:0,JSON.stringify([...new Set(gardens)]),expires,u.id,now()),auditStatement(env,u,'invitation.create',id)]);
-  return json({id,url:new URL(request.url).origin+'/app#invite='+token,expiresAt:expires},201);
+  const origin=externalLogin(env)?portalOrigin(request,env):new URL(request.url).origin,url=origin+(externalLogin(env)?'/login':'/app')+'#invite='+token;
+  let sent=false,mailError='';if(body.delivery==='email'){try{await authEmail(env,email,'Du er inviteret til Korsbjerg Gardening','Hej '+body.name.trim()+'\n\nAnton har inviteret dig til din personlige haveportal. Opret din konto via dette link:\n'+url+'\n\nInvitationen gælder kun din mailadresse, kan bruges én gang og udløber efter 48 timer. Videresend den ikke.\n\nVenlig hilsen\nAnton · Korsbjerg Gardening',id);sent=true;await audit(env,u,'invitation.email',id)}catch(error){mailError=error.message}}
+  return json({id,url,expiresAt:expires,sent,mailError},201);
  }
  const revoke=path.match(/^\/api\/access\/invitations\/([A-Za-z0-9_-]+)\/revoke$/);
  if(revoke&&request.method==='POST'){
@@ -234,8 +240,10 @@ async function accessRoutes(request,env,u){
   if(!target||!isAdmin&&target.role!=='customer')fail('Brugeren blev ikke fundet.',404);
   if(target.id===u.id)fail('Du kan ikke ændre din egen adgang. Brug en anden administrator.',409);
   const role=isAdmin?(body.role||target.role):'customer';if(!['administrator','anton','customer'].includes(role))fail('Ugyldig rolle.');
+  if(externalLogin(env)&&(target.role!=='customer'||role!=='customer'))fail('Microsoft-administratoren kan ikke ændres her.',403);
   const owner=await query(env,"SELECT data FROM portal_state WHERE id='owner'").first();if(owner&&JSON.parse(owner.data).id===target.id)fail('Den primære ejer kan ikke spærres eller ændres her.',409);
   const {state}=await sharedState(env,u),gardens=body.gardens;if(!Array.isArray(gardens)||!gardens.every(id=>safeId(id)&&state.gardens.some(g=>g.id===id))||role==='customer'&&body.active&&!gardens.length)fail('Kontroller havetilknytningen.');
+  if(externalLogin(env))await query(env,'DELETE FROM portal_login_sessions WHERE user_id=?',target.id).run();
   await env.DB.batch([query(env,'UPDATE portal_users SET role=?,can_operate=?,active=?,gardens=?,updated_at=? WHERE id=?',role,isAdmin&&role==='administrator'&&body.canOperate?1:0,body.active?1:0,JSON.stringify([...new Set(gardens)]),now(),target.id),query(env,'DELETE FROM portal_sessions WHERE user_id=?',target.id),auditStatement(env,u,'user.access',target.id)]);return json({ok:true});
  }
  return json({error:'Siden blev ikke fundet.'},404);

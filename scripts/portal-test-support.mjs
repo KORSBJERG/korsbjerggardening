@@ -1,7 +1,7 @@
 import {DatabaseSync} from 'node:sqlite';
 import {readFileSync} from 'node:fs';
 export function testDatabase(){
- const sqlite=new DatabaseSync(':memory:');sqlite.exec(readFileSync('drizzle/0000_portal_access.sql','utf8'));
+ const sqlite=new DatabaseSync(':memory:');sqlite.exec(readFileSync('drizzle/0000_portal_access.sql','utf8'));sqlite.exec(readFileSync('drizzle/0001_microsoft_customer_login.sql','utf8'));
  return {sqlite,prepare(sql){let values=[];return {bind(...v){values=v;return this},async first(){return sqlite.prepare(sql).get(...values)||null},async all(){return {results:sqlite.prepare(sql).all(...values)}},async run(){const s=sqlite.prepare(sql);const result=s.columns().length?(s.all(...values),sqlite.prepare('SELECT changes() AS changes').get()):s.run(...values);return {meta:{changes:Number(result.changes)}}}}},async batch(statements){sqlite.exec('BEGIN');try{const out=[];for(const statement of statements)out.push(await statement.run());sqlite.exec('COMMIT');return out}catch(error){sqlite.exec('ROLLBACK');throw error}}};
 }
 export const fixtureState=()=>({gardens:[],tasks:[],logs:[],messages:[],notifications:[],tools:[],quotes:[],prefs:{inapp:true,report:true,visit:true},timer:null,pricing:{hourlyRate:450,vat:25,history:[]},company:{name:'Testfirma',email:'staff@example.test'}});
